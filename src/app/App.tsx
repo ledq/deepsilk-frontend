@@ -26,7 +26,8 @@ export default function App() {
     setRunning,
     setProgress,
     videoRef,
-    overlayRef
+    overlayRef,
+    cleanup
   } = useAnnotator();
 
   // Wire our local refs into the hook's refs once
@@ -84,6 +85,7 @@ export default function App() {
   function onClear() {
     setProgress(0);
     setRunning(false);
+    cleanup(); // Clean up any ongoing animations and cached data
     const ctx = localOverlayRef.current?.getContext("2d");
     if (ctx) ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   }

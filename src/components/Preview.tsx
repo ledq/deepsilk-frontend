@@ -52,9 +52,9 @@ export default function Preview({ videoURL, onPick, videoRef, overlayRef }: Prop
             borderRadius: '6px',
             border: '1px solid rgba(110,231,183,.25)'
           }}>
-            📦 Detection Status
+            Real-Time Detection
           </span>
-          <span>Bounding boxes will appear on the video during inference</span>
+          <span>Live processing as video plays • Full video control maintained</span>
         </div>
       </div>
     </div>
