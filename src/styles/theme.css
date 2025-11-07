@@ -1,0 +1,23 @@
+:root{
+  --bg:#0b0d12; --panel:#10141b; --muted:#9aa3ad; --text:#eef1f6;
+  --accent:#6ee7b7; --accent2:#60a5fa; --danger:#ef4444;
+  --radius:16px; --gap:16px; --shadow:0 10px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{margin:0;background:radial-gradient(1100px 700px at 80% -10%, #121326 0%, var(--bg) 45%) fixed;color:var(--text);font-family:ui-sans-serif,system-ui,Segoe UI,Inter,Roboto,Arial}
+a{color:var(--accent2);text-decoration:none} a:hover{text-decoration:underline}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);backdrop-filter:blur(6px);box-shadow:var(--shadow)}
+.row{display:flex;flex-wrap:wrap;gap:var(--gap)}
+.col{flex:1 1 460px;min-width:320px}
+.panel{padding:16px}
+.label{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.3px;margin-bottom:8px}
+.input{display:inline-flex;align-items:center;gap:8px;background:#0f131a;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px 12px;color:var(--text);min-height:42px}
+.button{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.03));color:var(--text);cursor:pointer;transition:transform .05s,border-color .2s}
+.button:hover{border-color:rgba(255,255,255,.28)} .button:active{transform:translateY(1px)}
+.button.primary{background:linear-gradient(180deg,rgba(110,231,183,.25),rgba(110,231,183,.12));border-color:rgba(110,231,183,.45)}
+.button.alt{background:linear-gradient(180deg,rgba(96,165,250,.25),rgba(96,165,250,.12));border-color:rgba(96,165,250,.45)}
+.button.danger{background:linear-gradient(180deg,rgba(239,68,68,.22),rgba(239,68,68,.10));border-color:rgba(239,68,68,.45)}
+.badge{display:inline-flex;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:6px 10px;color:var(--muted);background:rgba(255,255,255,.04)}
+hr.line{border:none;height:1px;background:rgba(255,255,255,.09);margin:14px 0}
