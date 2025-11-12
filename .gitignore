@@ -23,3 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 node_modules\n.dist\nbuild\n.env*\n
+
+.env

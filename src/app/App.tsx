@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Controls from "../components/Controls";
 import Preview from "../components/Preview";
-import ProgressBar from "../components/ProgressBar";
+// import ProgressBar from "../components/ProgressBar";
 import { useAnnotator } from "../hooks/useAnnotator";
 import { annotateOnServer } from "../services/api";
 
@@ -10,9 +10,10 @@ export default function App() {
   // UI state
   const [videoURL, setVideoURL] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [fps, setFps] = useState(10);
-  const [conf, setConf] = useState(0.25);
-  const [iou, setIou] = useState(0.45);
+
+  // Detection mode: 'browser' or 'server'
+  const [detectionMode, setDetectionMode] = useState<'browser' | 'server'>('server');
+  const [annotatedVideoURL, setAnnotatedVideoURL] = useState<string | null>(null);
 
   // DOM refs for preview
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -22,9 +23,7 @@ export default function App() {
   const {
     runClient,
     running,
-    progress,
     setRunning,
-    setProgress,
     videoRef,
     overlayRef,
     cleanup
@@ -38,56 +37,63 @@ export default function App() {
 
   // File picked
   function onPick(f: File) {
-    setFile(f);
-    const url = URL.createObjectURL(f);
-    if (videoURL) URL.revokeObjectURL(videoURL);
-    setVideoURL(url);
+  setFile(f);
+  if (videoURL) URL.revokeObjectURL(videoURL);
+  setVideoURL(URL.createObjectURL(f));
   }
 
   // Run in browser (ONNX Runtime Web)
   async function onLocal() {
-    await runClient(fps, conf, iou /*, optional names array */);
+  await runClient(10, 0.25, 0.45 /*, optional names array */);
   }
 
   // Run on server (FastAPI /annotate)
   async function onServer() {
     if (!file) return;
     setRunning(true);
-    setProgress(15);
+  // setProgress(15); // Progress bar removed
+    setAnnotatedVideoURL(null);
     try {
-      const res = await annotateOnServer(file, fps, conf, iou, 640);
-      setProgress(70);
+  const res = await annotateOnServer(file, 10, 0.25, 0.45, 640);
+  // setProgress(70); // Progress bar removed
 
       if (res instanceof Blob) {
         // Direct MP4 stream
         const url = URL.createObjectURL(res);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "annotated.mp4";
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        setAnnotatedVideoURL(url);
+        // Download is now manual via button
       } else {
         // JSON response with URLs or payload
-        if (res.video_url) window.open(res.video_url, "_blank");
+        if (res.video_url) {
+          setAnnotatedVideoURL(res.video_url);
+        }
         if (res.json_url) window.open(res.json_url, "_blank");
       }
-      setProgress(100);
+  // setProgress(100); // Progress bar removed
     } catch (e) {
       console.error(e);
       alert("Server processing failed. Check backend or VITE_API_BASE.");
     } finally {
       setRunning(false);
-      setTimeout(() => setProgress(0), 800);
     }
   }
 
   // Clear overlay
   function onClear() {
-    setProgress(0);
+  // setProgress(0); // Progress bar removed
     setRunning(false);
     cleanup(); // Clean up any ongoing animations and cached data
     const ctx = localOverlayRef.current?.getContext("2d");
     if (ctx) ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+
+  // Unified detection handler
+  function onRunDetection() {
+    if (detectionMode === 'browser') {
+      onLocal();
+    } else {
+      onServer();
+    }
   }
 
   return (
@@ -101,36 +107,52 @@ export default function App() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
-        <section className="card panel">
-          <div className="label">1. Controls</div>
-          <Controls
-            fps={fps}
-            setFps={setFps}
-            conf={conf}
-            setConf={setConf}
-            iou={iou}
-            setIou={setIou}
-            onLocal={onLocal}
-            onServer={onServer}
-            onClear={onClear}
-            disabled={!videoURL || running}
-          />
-          <hr className="line" />
-          <ProgressBar value={progress} />
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-            {running ? "Processing…" : "Idle"} • API base:{" "}
-            <code>{import.meta.env.VITE_API_BASE ?? "(none)"}</code>
+        {/* Controls and Preview side by side */}
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'var(--gap)' }}>
+          <section className="card panel" style={{ flex: 1 }}>
+            <div className="label">1. Controls</div>
+            <Controls
+              detectionMode={detectionMode}
+              setDetectionMode={setDetectionMode}
+              onRunDetection={onRunDetection}
+              onClear={onClear}
+              disabled={!videoURL || running}
+              videoUploaded={!!videoURL}
+            />
+            <hr className="line" />
+          </section>
+          <section className="card panel" style={{ width: 'auto', flex: 'none', padding: '12px 12px 0 12px' }}>
+            <div className="label">2. Preview</div>
+            <Preview
+              videoURL={videoURL}
+              onPick={onPick}
+              videoRef={localVideoRef}
+              overlayRef={localOverlayRef}
+            />
+          </section>
+        </div>
+        {/* Detection panel below */}
+        <section className="card panel" style={{ marginTop: 'var(--gap)' }}>
+          <div className="label">3. Detection</div>
+          <div style={{ width: '100%', minHeight: 480, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--panel)', borderRadius: 12, color: 'var(--muted)', flexDirection: 'column', boxShadow: '0 4px 32px #0003', padding: 16 }}>
+            {running && detectionMode === 'server' ? (
+              <>
+                <div style={{marginBottom: 8}}>Processing on server…</div>
+                <div className="loader" style={{width: 32, height: 32, border: '4px solid #ccc', borderTop: '4px solid var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite'}} />
+              </>
+            ) : annotatedVideoURL && detectionMode === 'server' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                <video
+                  key={annotatedVideoURL}
+                  src={annotatedVideoURL}
+                  controls
+                  style={{ width: '90vw', maxWidth: 960, maxHeight: 540, borderRadius: 12, background: '#000', boxShadow: '0 2px 16px #0006' }}
+                />
+              </div>
+            ) : (
+              <span>Detection video will appear here</span>
+            )}
           </div>
-        </section>
-
-        <section className="card panel">
-          <div className="label">2. Preview</div>
-          <Preview
-            videoURL={videoURL}
-            onPick={onPick}
-            videoRef={localVideoRef}
-            overlayRef={localOverlayRef}
-          />
         </section>
       </div>
     </div>
