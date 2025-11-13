@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 
 export async function annotateOnServer(
-  file: File, fps: number, conf: number, iou: number, imgsz = 640
+  file: File, fps: number, conf: number, iou: number, imgsz = 320
 ): Promise<Blob | { video_url?: string; json_url?: string; frames?: unknown }> {
   if (!API_BASE) throw new Error("VITE_API_BASE not set");
   const form = new FormData();
