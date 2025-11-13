@@ -43,17 +43,8 @@ export default function App() {
   // Run in browser (ONNX Runtime Web)
   async function onLocal() {
     if (!videoURL) return;
-
-    // Ensure detection video actually plays so frames are available
-    if (videoRef.current && videoRef.current.paused) {
-      try {
-        await videoRef.current.play();
-      } catch (err) {
-        console.warn("Autoplay failed, user interaction may be required:", err);
-      }
-    }
-
-    // Slightly lower conf since NMS is baked into the ONNX
+    // Let useAnnotator handle playback and drawing
+    // Lower conf a bit because ONNX already has NMS baked in
     await runClient(10, 0.1, 0.45);
   }
 
@@ -85,7 +76,7 @@ export default function App() {
   // Clear overlay and state
   function onClear() {
     setRunning(false);
-    cleanup();               // stop browser-mode intervals & clear overlay
+    cleanup();               // stop browser-mode loop & clear overlay
     setAnnotatedVideoURL(null);
   }
 
@@ -198,7 +189,6 @@ export default function App() {
                   }}
                   muted
                   playsInline
-                  controls
                 />
                 <canvas
                   ref={overlayRef}

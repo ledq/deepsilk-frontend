@@ -1,10 +1,7 @@
 // src/hooks/useAnnotator.ts
 import { useCallback, useRef, useState } from "react";
 import { loadSession, runOnnx, type Detection } from "../services/inference";
-
-type TimestampedDetections = {
-  [timestamp: number]: Detection[];
-};
+import { drawDetections } from "../utils/draw";
 
 export function useAnnotator() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -13,25 +10,35 @@ export function useAnnotator() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const detectionsCache = useRef<TimestampedDetections>({});
-  const processingIntervalRef = useRef<number | undefined>(undefined);
+  const rafIdRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const isRunningRef = useRef(false);
 
-  // Main browser-side detection loop
+  // Keep last non-empty detections so boxes stay visible
+  const lastDetectionsRef = useRef<Detection[]>([]);
+
   const runClient = useCallback(
     async (fps: number, conf: number, iou: number, names?: string[]) => {
-      if (!videoRef.current || !overlayRef.current) return;
-
-      // Make sure ONNX session is ready
-      await loadSession();
-
       const video = videoRef.current;
       const overlay = overlayRef.current;
+      if (!video || !overlay) return;
+
+      // Stop any previous run
+      if (rafIdRef.current !== null) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      isRunningRef.current = false;
+      isProcessingRef.current = false;
+      lastDetectionsRef.current = [];
+
+      // Ensure ONNX session loaded
+      await loadSession();
+
       const ctx = overlay.getContext("2d");
       if (!ctx) return;
 
-      // Match overlay canvas size to rendered video size
+      // Match overlay size to the rendered video box
       const rect = video.getBoundingClientRect();
       overlay.width = rect.width;
       overlay.height = rect.height;
@@ -40,147 +47,130 @@ export function useAnnotator() {
 
       setRunning(true);
       setProgress(0);
-      detectionsCache.current = {};
+      isRunningRef.current = true;
 
       // Offscreen canvas for model input
-      const MODEL_SIZE = 320; // must match imgsz used in export
+      const MODEL_SIZE = 320; // must match imgsz used in ONNX export
       const processCanvas = document.createElement("canvas");
       processCanvas.width = MODEL_SIZE;
       processCanvas.height = MODEL_SIZE;
-
       const processCtx = processCanvas.getContext("2d");
       if (!processCtx) return;
 
-      const captureAndProcess = async () => {
-        if (!video || video.paused || video.ended) return;
-        if (isProcessingRef.current) return;
+      // Prepare video playback
+      try {
+        video.currentTime = 0;
+      } catch {
+        // ignore seek errors
+      }
+      video.muted = true;
+      video.playsInline = true;
 
+      try {
+        await video.play();
+      } catch (err) {
+        console.warn(
+          "Video autoplay failed, user interaction may be required:",
+          err
+        );
+      }
+
+      const processFrame = async () => {
+        if (!video || video.ended || !isRunningRef.current) {
+          return;
+        }
+
+        // Only process if video is playing and we are not already in a call
+        if (video.paused || isProcessingRef.current) {
+          return;
+        }
         isProcessingRef.current = true;
+
         try {
-          // Draw current video frame into model resolution
+          // Draw current frame into model-sized canvas
           processCtx.drawImage(video, 0, 0, MODEL_SIZE, MODEL_SIZE);
 
-          // Run ONNX inference - returns boxes in model space
+          // Run ONNX inference -> model-space boxes
           const detections = await runOnnx(processCanvas, {
             conf,
             iou,
             names,
           });
 
-          // Scale boxes from [0, MODEL_SIZE] to overlay size
+          // Scale boxes to overlay size
           const scaled = detections.map((det) => {
             const [x1, y1, x2, y2] = det.xyxy;
             const sx1 = (x1 / MODEL_SIZE) * overlay.width;
             const sy1 = (y1 / MODEL_SIZE) * overlay.height;
             const sx2 = (x2 / MODEL_SIZE) * overlay.width;
             const sy2 = (y2 / MODEL_SIZE) * overlay.height;
-
             return {
               ...det,
               xyxy: [sx1, sy1, sx2, sy2] as [number, number, number, number],
             };
           });
 
-          // Cache by rounded timestamp for progress tracking
-          const timestamp = Math.round(video.currentTime * fps) / fps;
-          detectionsCache.current[timestamp] = scaled;
+          // Only overwrite last detections if we have any
+          if (scaled.length > 0) {
+            lastDetectionsRef.current = scaled;
+          }
 
-          // Clear overlay and draw current frame detections
+          // Clear overlay and draw the last known detections
           ctx.clearRect(0, 0, overlay.width, overlay.height);
-          const { drawDetections } = await import("../utils/draw");
-          drawDetections(ctx, scaled);
+          if (lastDetectionsRef.current.length > 0) {
+            drawDetections(ctx, lastDetectionsRef.current);
+          }
 
-          // Simple progress estimate: processed timestamps / duration
-          const processedDuration =
-            Object.keys(detectionsCache.current).length / fps;
+          // Simple progress: based on video time
           if (video.duration) {
             const percent = Math.min(
               100,
-              Math.round((processedDuration / video.duration) * 100)
+              Math.round((video.currentTime / video.duration) * 100)
             );
             setProgress(percent);
           }
-        } catch (err) {
-          console.error("Frame processing error:", err);
+        } catch (error) {
+          console.error("Frame processing error:", error);
         } finally {
           isProcessingRef.current = false;
         }
       };
 
-      // Clear any old interval before starting a new run
-      if (processingIntervalRef.current !== undefined) {
-        window.clearInterval(processingIntervalRef.current);
-      }
-      processingIntervalRef.current = window.setInterval(
-        captureAndProcess,
-        1000 / fps
-      );
+      const loop = async () => {
+        if (!isRunningRef.current || !video) {
+          return;
+        }
 
-      const handleSeeked = () => {
-        // After seeking, process one fresh frame
-        setTimeout(() => {
-          if (!video.paused && !video.ended) {
-            captureAndProcess();
-          }
-        }, 100);
-      };
+        if (video.ended) {
+          isRunningRef.current = false;
+          setRunning(false);
+          return;
+        }
 
-      const handlePlay = () => {
-        if (processingIntervalRef.current === undefined) {
-          processingIntervalRef.current = window.setInterval(
-            captureAndProcess,
-            1000 / fps
-          );
+        await processFrame();
+        if (isRunningRef.current) {
+          rafIdRef.current = window.requestAnimationFrame(loop);
         }
       };
 
-      const handlePause = () => {
-        if (processingIntervalRef.current !== undefined) {
-          window.clearInterval(processingIntervalRef.current);
-          processingIntervalRef.current = undefined;
-        }
-      };
-
-      video.addEventListener("seeked", handleSeeked);
-      video.addEventListener("play", handlePlay);
-      video.addEventListener("pause", handlePause);
-
-      // Store how to undo all of this
-      cleanupRef.current = () => {
-        if (processingIntervalRef.current !== undefined) {
-          window.clearInterval(processingIntervalRef.current);
-          processingIntervalRef.current = undefined;
-        }
-        video.removeEventListener("seeked", handleSeeked);
-        video.removeEventListener("play", handlePlay);
-        video.removeEventListener("pause", handlePause);
-      };
-
-      // Kick off first frame if video is already loaded
-      if (video.readyState >= 2) {
-        captureAndProcess();
-      }
+      // Start animation loop
+      rafIdRef.current = window.requestAnimationFrame(loop);
     },
     []
   );
 
-  // Cleanup you can call from App (onClear, unmount, etc.)
   const cleanup = useCallback(() => {
-    setRunning(false);
-    setProgress(0);
+    isRunningRef.current = false;
     isProcessingRef.current = false;
 
-    if (processingIntervalRef.current !== undefined) {
-      window.clearInterval(processingIntervalRef.current);
-      processingIntervalRef.current = undefined;
+    if (rafIdRef.current !== null) {
+      window.cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
     }
 
-    if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
-    }
-
-    detectionsCache.current = {};
+    setRunning(false);
+    setProgress(0);
+    lastDetectionsRef.current = [];
 
     if (overlayRef.current) {
       const ctx = overlayRef.current.getContext("2d");
