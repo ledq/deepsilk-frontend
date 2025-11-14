@@ -38,7 +38,6 @@ export default function Controls(p: Props){
 
 
       <button className="button primary" onClick={p.onRunDetection} disabled={p.disabled}>▶ Run detection</button>
-      <button className="button danger" onClick={p.onClear} disabled={p.disabled}>✕ Clear</button>
     </div>
   );
 }

@@ -5,10 +5,9 @@ type Props = {
   videoURL: string | null;
   onPick: (f: File) => void;
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  overlayRef: React.RefObject<HTMLCanvasElement | null>;
 };
 
-export default function Preview({ videoURL, onPick, videoRef, overlayRef }: Props) {
+export default function Preview({ videoURL, onPick, videoRef }: Props) {
   const [showModal, setShowModal] = useState(false);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
@@ -87,7 +86,7 @@ export default function Preview({ videoURL, onPick, videoRef, overlayRef }: Prop
         document.body
       )}
       {/* File input */}
-      <div style={{ marginTop: 6 }}>
+      <div style={{ marginTop: 6, paddingBottom: 16, width: '100%', display: 'flex', justifyContent: 'center' }}>
         <label className="input" htmlFor="file" style={{ cursor: "pointer" }}>
           <span>Choose video…</span>
           <input

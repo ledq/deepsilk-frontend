@@ -21,7 +21,7 @@ export function useAnnotator() {
   const seekHandlerRef = useRef<((ev: Event) => void) | null>(null);
 
   const runClient = useCallback(
-    async (fps: number, conf: number, iou: number, names?: string[]) => {
+    async (fps: number, conf: number, iou: number) => {
       const video = videoRef.current;
       const overlay = overlayRef.current;
       if (!video || !overlay) return;

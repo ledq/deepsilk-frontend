@@ -20,7 +20,6 @@ export default function App() {
 
   // Preview refs (used only inside Preview panel)
   const previewVideoRef = useRef<HTMLVideoElement>(null);
-  const previewOverlayRef = useRef<HTMLCanvasElement>(null);
 
   // Annotator hook (for browser mode, detection panel)
   const {
@@ -54,7 +53,7 @@ export default function App() {
     setRunning(true);
     setAnnotatedVideoURL(null);
     try {
-      const res = await annotateOnServer(file, 10, 0.25, 0.45, 640);
+      const res = await annotateOnServer(file, 10, 0.25, 0.45, 320);
 
       if (res instanceof Blob) {
         const url = URL.createObjectURL(res);
@@ -139,7 +138,6 @@ export default function App() {
               videoURL={videoURL}
               onPick={onPick}
               videoRef={previewVideoRef}
-              overlayRef={previewOverlayRef}
             />
           </section>
         </div>
