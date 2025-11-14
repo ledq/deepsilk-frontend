@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from "react";
 import { loadSession, runOnnx, type Detection } from "../services/inference";
 import { drawDetections } from "../utils/draw";
+import { SILKSONG_CLASS_NAMES } from "../data/classNames";
 
 export function useAnnotator() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -10,12 +11,14 @@ export function useAnnotator() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const rafIdRef = useRef<number | null>(null);
-  const isProcessingRef = useRef(false);
   const isRunningRef = useRef(false);
+  const isProcessingRef = useRef(false);
 
-  // Keep last non-empty detections so boxes stay visible
+  // Keep last detections for drawing (optional, but handy if you want to reuse)
   const lastDetectionsRef = useRef<Detection[]>([]);
+
+  // We need to remember the seeked handler to detach it in cleanup
+  const seekHandlerRef = useRef<((ev: Event) => void) | null>(null);
 
   const runClient = useCallback(
     async (fps: number, conf: number, iou: number, names?: string[]) => {
@@ -23,138 +26,150 @@ export function useAnnotator() {
       const overlay = overlayRef.current;
       if (!video || !overlay) return;
 
-      // Stop any previous run
-      if (rafIdRef.current !== null) {
-        window.cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
+      // Clean up any previous run
       isRunningRef.current = false;
       isProcessingRef.current = false;
       lastDetectionsRef.current = [];
+      setProgress(0);
 
-      // Ensure ONNX session loaded
+      // Remove old seek handler if any
+      if (seekHandlerRef.current) {
+        video.removeEventListener("seeked", seekHandlerRef.current);
+        seekHandlerRef.current = null;
+      }
+
+      // Load ONNX session
       await loadSession();
 
       const ctx = overlay.getContext("2d");
       if (!ctx) return;
 
-      // Match overlay size to the rendered video box
+      // Match overlay size to rendered video
       const rect = video.getBoundingClientRect();
       overlay.width = rect.width;
       overlay.height = rect.height;
       overlay.style.width = `${rect.width}px`;
       overlay.style.height = `${rect.height}px`;
 
-      setRunning(true);
-      setProgress(0);
-      isRunningRef.current = true;
-
-      // Offscreen canvas for model input
-      const MODEL_SIZE = 320; // must match imgsz used in ONNX export
+      const MODEL_SIZE = 320; // must match your ONNX export imgsz
       const processCanvas = document.createElement("canvas");
       processCanvas.width = MODEL_SIZE;
       processCanvas.height = MODEL_SIZE;
       const processCtx = processCanvas.getContext("2d");
       if (!processCtx) return;
 
-      // Prepare video playback
-      try {
-        video.currentTime = 0;
-      } catch {
-        // ignore seek errors
-      }
-      video.muted = true;
-      video.playsInline = true;
+      isRunningRef.current = true;
+      setRunning(true);
+      lastDetectionsRef.current = [];
 
-      try {
-        await video.play();
-      } catch (err) {
-        console.warn(
-          "Video autoplay failed, user interaction may be required:",
-          err
-        );
-      }
+      // Core routine: run detection on the current frame
+      const processCurrentFrame = async () => {
+        const v = videoRef.current;
+        const o = overlayRef.current;
+        if (!v || !o) return;
+        if (!isRunningRef.current) return;
+        if (v.duration === 0) return;
 
-      const processFrame = async () => {
-        if (!video || video.ended || !isRunningRef.current) {
+        // Stop when we reach the end
+        if (v.currentTime >= v.duration) {
+          isRunningRef.current = false;
+          setRunning(false);
           return;
         }
 
-        // Only process if video is playing and we are not already in a call
-        if (video.paused || isProcessingRef.current) {
-          return;
-        }
+        // Don't start another inference if one is still going
+        if (isProcessingRef.current) return;
         isProcessingRef.current = true;
 
         try {
-          // Draw current frame into model-sized canvas
-          processCtx.drawImage(video, 0, 0, MODEL_SIZE, MODEL_SIZE);
+          // Draw current video frame into model-sized canvas
+          processCtx.drawImage(v, 0, 0, MODEL_SIZE, MODEL_SIZE);
 
-          // Run ONNX inference -> model-space boxes
+          // Run ONNX inference
           const detections = await runOnnx(processCanvas, {
             conf,
             iou,
-            names,
+            names: SILKSONG_CLASS_NAMES,
           });
 
-          // Scale boxes to overlay size
+          // Scale boxes from model space to overlay space
           const scaled = detections.map((det) => {
             const [x1, y1, x2, y2] = det.xyxy;
-            const sx1 = (x1 / MODEL_SIZE) * overlay.width;
-            const sy1 = (y1 / MODEL_SIZE) * overlay.height;
-            const sx2 = (x2 / MODEL_SIZE) * overlay.width;
-            const sy2 = (y2 / MODEL_SIZE) * overlay.height;
+            const sx1 = (x1 / MODEL_SIZE) * o.width;
+            const sy1 = (y1 / MODEL_SIZE) * o.height;
+            const sx2 = (x2 / MODEL_SIZE) * o.width;
+            const sy2 = (y2 / MODEL_SIZE) * o.height;
             return {
               ...det,
               xyxy: [sx1, sy1, sx2, sy2] as [number, number, number, number],
             };
           });
 
-          // Only overwrite last detections if we have any
+          lastDetectionsRef.current = scaled;
+
+          // Draw detections for *this* frame
+          ctx.clearRect(0, 0, o.width, o.height);
           if (scaled.length > 0) {
-            lastDetectionsRef.current = scaled;
+            drawDetections(ctx, scaled);
           }
 
-          // Clear overlay and draw the last known detections
-          ctx.clearRect(0, 0, overlay.width, overlay.height);
-          if (lastDetectionsRef.current.length > 0) {
-            drawDetections(ctx, lastDetectionsRef.current);
-          }
+          // Update progress based on current time
+          const pct =
+            v.duration > 0
+              ? Math.min(100, Math.round((v.currentTime / v.duration) * 100))
+              : 0;
+          setProgress(pct);
 
-          // Simple progress: based on video time
-          if (video.duration) {
-            const percent = Math.min(
-              100,
-              Math.round((video.currentTime / video.duration) * 100)
-            );
-            setProgress(percent);
+          // Advance to next frame time
+          const frameStep = 1 / fps; // seconds per "step"
+          const nextTime = v.currentTime + frameStep;
+          if (nextTime < v.duration && isRunningRef.current) {
+            v.currentTime = nextTime; // triggers "seeked" → process next frame
+          } else {
+            // End
+            isRunningRef.current = false;
+            setRunning(false);
           }
-        } catch (error) {
-          console.error("Frame processing error:", error);
+        } catch (err) {
+          console.error("Frame processing error:", err);
+          isRunningRef.current = false;
+          setRunning(false);
         } finally {
           isProcessingRef.current = false;
         }
       };
 
-      const loop = async () => {
-        if (!isRunningRef.current || !video) {
-          return;
-        }
-
-        if (video.ended) {
-          isRunningRef.current = false;
-          setRunning(false);
-          return;
-        }
-
-        await processFrame();
-        if (isRunningRef.current) {
-          rafIdRef.current = window.requestAnimationFrame(loop);
-        }
+      // When the video has finished seeking to a new time, process that frame
+      const handleSeeked = () => {
+        if (!isRunningRef.current) return;
+        // Process the frame at the newly-seeked currentTime
+        void processCurrentFrame();
       };
 
-      // Start animation loop
-      rafIdRef.current = window.requestAnimationFrame(loop);
+      seekHandlerRef.current = handleSeeked;
+      video.addEventListener("seeked", handleSeeked);
+
+      // Start from the beginning
+      try {
+        video.pause();
+        video.currentTime = 0;
+      } catch {
+        // ignore
+      }
+
+      // If metadata is loaded, process immediately once;
+      // otherwise wait for loadeddata and then process.
+      if (video.readyState >= 2) {
+        // We have enough data to grab a frame
+        void processCurrentFrame();
+      } else {
+        const handleLoadedData = () => {
+          video.removeEventListener("loadeddata", handleLoadedData);
+          if (!isRunningRef.current) return;
+          void processCurrentFrame();
+        };
+        video.addEventListener("loadeddata", handleLoadedData);
+      }
     },
     []
   );
@@ -163,24 +178,21 @@ export function useAnnotator() {
     isRunningRef.current = false;
     isProcessingRef.current = false;
 
-    if (rafIdRef.current !== null) {
-      window.cancelAnimationFrame(rafIdRef.current);
-      rafIdRef.current = null;
+    const video = videoRef.current;
+    if (video && seekHandlerRef.current) {
+      video.removeEventListener("seeked", seekHandlerRef.current);
+      seekHandlerRef.current = null;
     }
 
     setRunning(false);
     setProgress(0);
     lastDetectionsRef.current = [];
 
-    if (overlayRef.current) {
-      const ctx = overlayRef.current.getContext("2d");
+    const overlay = overlayRef.current;
+    if (overlay) {
+      const ctx = overlay.getContext("2d");
       if (ctx) {
-        ctx.clearRect(
-          0,
-          0,
-          overlayRef.current.width,
-          overlayRef.current.height
-        );
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
       }
     }
   }, []);

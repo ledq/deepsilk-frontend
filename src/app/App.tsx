@@ -76,7 +76,7 @@ export default function App() {
   // Clear overlay and state
   function onClear() {
     setRunning(false);
-    cleanup();               // stop browser-mode loop & clear overlay
+    cleanup();           
     setAnnotatedVideoURL(null);
   }
 
@@ -93,9 +93,9 @@ export default function App() {
     <div className="container">
       <div className="hero">
         <span className="badge">DeepSilk • Silksong video annotator</span>
-        <h1>Upload clip → annotate → export</h1>
+        <h1>Silksong Entity Detection</h1>
         <div className="sub">
-          Client ONNX with optional FastAPI fallback. Fully responsive layout.
+          Run object detection on Silksong videos, either in your browser or on server
         </div>
       </div>
 
@@ -106,7 +106,6 @@ export default function App() {
           gap: "var(--gap)",
         }}
       >
-        {/* Controls and Preview side by side */}
         <div
           style={{
             display: "flex",
