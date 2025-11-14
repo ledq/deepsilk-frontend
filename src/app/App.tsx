@@ -53,7 +53,7 @@ export default function App() {
     setRunning(true);
     setAnnotatedVideoURL(null);
     try {
-      const res = await annotateOnServer(file, 10, 0.25, 0.45, 320);
+      const res = await annotateOnServer(file, 30, 0.25, 0.45, 320);
 
       if (res instanceof Blob) {
         const url = URL.createObjectURL(res);
